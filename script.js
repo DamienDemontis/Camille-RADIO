@@ -4,6 +4,7 @@ let isPlaying = false;
 let audioElement = null;
 let isLocalFile = false;
 let visualizationInterval = null;
+let audioVisualizationInitialized = false; // Nouvelle variable pour éviter les doublons
 
 // Initialize everything when DOM is loaded
 document.addEventListener('DOMContentLoaded', function() {
@@ -78,12 +79,12 @@ function initializeCountdown() {
     
     function updateCountdown() {
         const now = new Date().getTime();
-        const targetDate = new Date('2025-06-01').getTime();
+        const targetDate = new Date('2025-06-21').getTime();
         const distance = targetDate - now;
         
         if (distance < 0) {
             // Camille is born! Calculate her age
-            const birthDate = new Date('2025-06-01');
+            const birthDate = new Date('2025-06-21');
             const currentDate = new Date();
             
             const ageInMs = currentDate - birthDate;
@@ -131,19 +132,27 @@ function initializeAudio() {
     audioElement.addEventListener('canplaythrough', function() {
         console.log('Audio file detected and ready!');
         
-        if (isLocalFile) {
-            // For local files, use synchronized heartbeat visualization
-            console.log('Local file detected, using synchronized heartbeat visualization');
-            createHeartbeatWaveform();
-        } else {
-            // For web, use WaveSurfer normally
-            initializeWaveSurfer();
+        // Initialiser la visualisation une seule fois
+        if (!audioVisualizationInitialized) {
+            audioVisualizationInitialized = true;
+            
+            if (isLocalFile) {
+                // For local files, use synchronized heartbeat visualization
+                console.log('Local file detected, using synchronized heartbeat visualization');
+                createHeartbeatWaveform();
+            } else {
+                // For web, use WaveSurfer normally
+                initializeWaveSurfer();
+            }
         }
     });
     
     audioElement.addEventListener('error', function(e) {
         console.log('No valid audio file found, using demo waveform');
-        createDemoWaveform();
+        if (!audioVisualizationInitialized) {
+            audioVisualizationInitialized = true;
+            createDemoWaveform();
+        }
     });
     
     // Try to load the audio
@@ -151,8 +160,9 @@ function initializeAudio() {
     
     // If no audio loads after 2 seconds, show demo
     setTimeout(() => {
-        if (audioElement.readyState === 0) {
+        if (audioElement.readyState === 0 && !audioVisualizationInitialized) {
             console.log('No audio loaded after timeout, showing demo waveform');
+            audioVisualizationInitialized = true;
             createDemoWaveform();
         }
     }, 2000);
@@ -203,10 +213,7 @@ function createHeartbeatWaveform() {
     const waveformContainer = document.getElementById('waveform');
     
     // Clear any existing content
-    const existingCanvas = waveformContainer.querySelector('canvas');
-    if (existingCanvas) {
-        existingCanvas.remove();
-    }
+    waveformContainer.innerHTML = '';
     
     const canvas = document.createElement('canvas');
     canvas.width = waveformContainer.offsetWidth || 400;
@@ -216,74 +223,187 @@ function createHeartbeatWaveform() {
     waveformContainer.appendChild(canvas);
     
     const ctx = canvas.getContext('2d');
-    let heartbeatPhase = 0;
     let isAudioPlaying = false;
+    let audioContext = null;
+    let analyser = null;
+    let dataArray = null;
+    let hasRealAudio = false;
+    let source = null;
     
-    // Monitor audio play state
-    audioElement.addEventListener('play', () => {
-        isAudioPlaying = true;
-        console.log('Audio playing, activating heartbeat visualization');
-    });
+    // Variables pour la répartition audio
+    let audioData = new Array(128).fill(0); // Buffer pour lisser les données
     
-    audioElement.addEventListener('pause', () => {
-        isAudioPlaying = false;
-    });
-    
-    audioElement.addEventListener('ended', () => {
-        isAudioPlaying = false;
-    });
-    
-    function drawHeartbeatWaveform() {
-        if (!canvas.parentNode) return;
-        
-        requestAnimationFrame(drawHeartbeatWaveform);
-        
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-        
-        const barWidth = 4;
-        const barGap = 2;
-        const barCount = Math.floor(canvas.width / (barWidth + barGap));
-        const centerY = canvas.height / 2;
-        
-        for (let i = 0; i < barCount; i++) {
-            const x = i * (barWidth + barGap);
+    function setupAudioAnalysis() {
+        try {
+            if (audioContext) return; // Éviter les doublons
             
-            let barHeight;
-            if (isAudioPlaying) {
-                // Simulate heartbeat pattern when audio is playing
-                const heartbeatSpeed = 0.08; // Speed of heartbeat animation
-                const position = (heartbeatPhase + i * 0.1) % (Math.PI * 2);
-                
-                // Create double-beat pattern (lub-dub)
-                const beat1 = Math.max(0, Math.sin(position)) * 0.8;
-                const beat2 = Math.max(0, Math.sin(position * 2 + Math.PI/2)) * 0.4;
-                const combined = beat1 + beat2;
-                
-                barHeight = combined * 35 + 8; // Base height + heartbeat variation
-            } else {
-                // Gentle static pattern when paused
-                barHeight = Math.abs(Math.sin(i * 0.2)) * 15 + 5;
-            }
+            // Create audio context when user interacts
+            audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            analyser = audioContext.createAnalyser();
             
-            const y = centerY - barHeight / 2;
+            // Connect to the audio element
+            source = audioContext.createMediaElementSource(audioElement);
+            source.connect(analyser);
+            analyser.connect(audioContext.destination);
             
-            // Create gradient based on intensity
-            const intensity = barHeight / 50;
-            const gradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
-            gradient.addColorStop(0, `rgba(255, 182, 193, ${0.6 + intensity * 0.3})`);
-            gradient.addColorStop(1, `rgba(255, 105, 180, ${0.8 + intensity * 0.2})`);
+            analyser.fftSize = 256;
+            analyser.smoothingTimeConstant = 0.85;
+            const bufferLength = analyser.frequencyBinCount;
+            dataArray = new Uint8Array(bufferLength);
             
-            ctx.fillStyle = gradient;
-            ctx.fillRect(x, y, barWidth, barHeight);
-        }
-        
-        if (isAudioPlaying) {
-            heartbeatPhase += 0.08; // Heartbeat speed
+            hasRealAudio = true;
+            console.log('Real audio analysis setup successful!');
+            
+        } catch (error) {
+            console.log('Could not setup real audio analysis, using simulation:', error);
+            hasRealAudio = false;
         }
     }
     
-    drawHeartbeatWaveform();
-    console.log('Heartbeat visualization ready!');
+    // Event listeners pour l'audio (définis une seule fois)
+    function onPlay() {
+        isAudioPlaying = true;
+        console.log('Audio playing, activating visualization');
+        
+        if (!hasRealAudio && !audioContext) {
+            setupAudioAnalysis();
+        }
+        
+        // Resume audio context si suspendu
+        if (audioContext && audioContext.state === 'suspended') {
+            audioContext.resume();
+        }
+    }
+    
+    function onPause() {
+        isAudioPlaying = false;
+    }
+    
+    function onEnded() {
+        isAudioPlaying = false;
+    }
+    
+    // Ajouter les listeners une seule fois
+    audioElement.addEventListener('play', onPlay);
+    audioElement.addEventListener('pause', onPause);
+    audioElement.addEventListener('ended', onEnded);
+    
+    function drawVisualization() {
+        if (!canvas.parentNode) return;
+        
+        requestAnimationFrame(drawVisualization);
+        
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        
+        const barWidth = 3;
+        const barGap = 1;
+        const barCount = Math.floor(canvas.width / (barWidth + barGap));
+        const centerY = canvas.height / 2;
+        
+        if (isAudioPlaying && hasRealAudio && analyser && dataArray) {
+            // Get real audio data
+            analyser.getByteFrequencyData(dataArray);
+            
+            // Pour les battements de cœur, l'énergie est surtout dans les basses fréquences
+            // On va utiliser seulement les premières fréquences mais les répartir sur toute la largeur
+            const usefulFreqRange = Math.min(32, dataArray.length); // Utiliser seulement les 32 premières fréquences
+            
+            for (let i = 0; i < barCount; i++) {
+                // Mapper chaque barre à une fréquence dans la plage utile
+                const freqIndex = Math.floor((i / barCount) * usefulFreqRange);
+                
+                // Prendre la valeur principale + quelques voisines
+                let amplitude = dataArray[freqIndex];
+                
+                // Ajouter les fréquences adjacentes pour plus de richesse
+                if (freqIndex + 1 < usefulFreqRange) amplitude += dataArray[freqIndex + 1] * 0.5;
+                if (freqIndex - 1 >= 0) amplitude += dataArray[freqIndex - 1] * 0.5;
+                
+                // Normaliser
+                amplitude = amplitude / 255;
+                
+                // Ajouter des variations basées sur la position pour étaler visuellement
+                const positionVariation = Math.sin((i / barCount) * Math.PI * 2) * 0.3 + 1;
+                amplitude *= positionVariation;
+                
+                // Ajouter un peu de variation temporelle pour plus de dynamisme
+                const timeVariation = Math.sin(Date.now() / 1000 + i * 0.1) * 0.2 + 1;
+                amplitude *= timeVariation;
+                
+                // Courbe de sensibilité
+                amplitude = Math.pow(amplitude, 0.7) * 1.8;
+                
+                // Stocker dans notre buffer pour lisser
+                audioData[i] = audioData[i] * 0.6 + amplitude * 0.4;
+                
+                // Calculer la hauteur de la barre
+                const barHeight = Math.max(3, audioData[i] * 45);
+                const y = centerY - barHeight / 2;
+                const x = i * (barWidth + barGap);
+                
+                // Gradient basé sur l'amplitude
+                const intensity = audioData[i];
+                const gradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
+                gradient.addColorStop(0, `rgba(255, 182, 193, ${0.8 + intensity * 0.2})`);
+                gradient.addColorStop(0.5, `rgba(255, 105, 180, ${0.9 + intensity * 0.1})`);
+                gradient.addColorStop(1, `rgba(255, 20, 147, ${0.7 + intensity * 0.3})`);
+                
+                ctx.fillStyle = gradient;
+                ctx.fillRect(x, y, barWidth, barHeight);
+            }
+            
+        } else {
+            // Pattern de fallback
+            for (let i = 0; i < barCount; i++) {
+                const x = i * (barWidth + barGap);
+                let barHeight;
+                
+                if (isAudioPlaying) {
+                    // Simulate heartbeat pattern
+                    const time = Date.now() / 1000;
+                    const beatFreq = 2;
+                    const position = (time * beatFreq + i * 0.1) % 1;
+                    
+                    let intensity = 0;
+                    
+                    if (position < 0.15) {
+                        intensity = Math.sin((position / 0.15) * Math.PI) * 0.9;
+                    } else if (position < 0.2) {
+                        intensity = 0;
+                    } else if (position < 0.3) {
+                        intensity = Math.sin(((position - 0.2) / 0.1) * Math.PI) * 0.5;
+                    } else {
+                        intensity = (Math.random() - 0.5) * 0.08;
+                    }
+                    
+                    const barVariation = Math.sin(i * 0.3) * 0.1;
+                    intensity = Math.max(0, intensity + barVariation);
+                    barHeight = intensity * 40 + 5;
+                } else {
+                    barHeight = Math.abs(Math.sin(i * 0.4)) * 6 + 2;
+                }
+                
+                const y = centerY - barHeight / 2;
+                const intensity = barHeight / 45;
+                const gradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
+                
+                if (isAudioPlaying) {
+                    gradient.addColorStop(0, `rgba(255, 182, 193, ${0.7 + intensity * 0.3})`);
+                    gradient.addColorStop(1, `rgba(255, 105, 180, ${0.6 + intensity * 0.4})`);
+                } else {
+                    gradient.addColorStop(0, `rgba(255, 182, 193, 0.4)`);
+                    gradient.addColorStop(1, `rgba(255, 105, 180, 0.3)`);
+                }
+                
+                ctx.fillStyle = gradient;
+                ctx.fillRect(x, y, barWidth, barHeight);
+            }
+        }
+    }
+    
+    // Start visualization
+    drawVisualization();
+    console.log('Audio visualization ready!');
 }
 
 // Create a demo waveform visualization
@@ -406,6 +526,9 @@ function setupEventListeners() {
     
     // HTML Audio events (for local files)
     if (audioElement) {
+        // Enable loop by default
+        audioElement.loop = true;
+        
         audioElement.addEventListener('play', () => {
             if (!wavesurfer || !wavesurfer.isReady) {
                 isPlaying = true;
@@ -421,9 +544,18 @@ function setupEventListeners() {
         });
         
         audioElement.addEventListener('ended', () => {
-            if (!wavesurfer || !wavesurfer.isReady) {
+            // This shouldn't happen with loop=true, but just in case
+            if (!audioElement.loop && (!wavesurfer || !wavesurfer.isReady)) {
                 isPlaying = false;
                 updatePlayButton(false);
+            }
+        });
+        
+        // Handle loop
+        audioElement.addEventListener('timeupdate', () => {
+            // Ensure loop is always enabled when audio is playing
+            if (isPlaying && !audioElement.loop) {
+                audioElement.loop = true;
             }
         });
     }
