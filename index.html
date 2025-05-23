@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bienvenue Camille 💕</title>
+    <link rel="stylesheet" href="style.css">
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;600;700&display=swap" rel="stylesheet">
+    <script src="https://unpkg.com/wavesurfer.js@7"></script>
+</head>
+<body>
+    <div class="container">
+        <!-- Particle background -->
+        <div class="particles" id="particles"></div>
+        
+        <!-- Main content -->
+        <div class="content">
+            <div class="header">
+                <h1 class="title">
+                    <span class="gradient-text">Bienvenue</span>
+                    <span class="name">Camille</span>
+                </h1>
+                <p class="subtitle">Une petite merveille arrive en juin 2025 ✨</p>
+            </div>
+
+            <!-- Baby illustration container -->
+            <div class="baby-container">
+                <div class="heart-beat">💕</div>
+                <div class="baby-silhouette">
+                    <svg width="160" height="160" viewBox="0 0 160 160" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <!-- Baby head -->
+                        <circle cx="80" cy="60" r="35" fill="url(#babyGradient)" opacity="0.9"/>
+                        
+                        <!-- Baby body -->
+                        <ellipse cx="80" cy="110" rx="25" ry="35" fill="url(#babyGradient)" opacity="0.9"/>
+                        
+                        <!-- Arms -->
+                        <ellipse cx="55" cy="95" rx="8" ry="18" fill="url(#babyGradient)" opacity="0.8" transform="rotate(-20 55 95)"/>
+                        <ellipse cx="105" cy="95" rx="8" ry="18" fill="url(#babyGradient)" opacity="0.8" transform="rotate(20 105 95)"/>
+                        
+                        <!-- Legs -->
+                        <ellipse cx="68" cy="135" rx="8" ry="20" fill="url(#babyGradient)" opacity="0.8" transform="rotate(-10 68 135)"/>
+                        <ellipse cx="92" cy="135" rx="8" ry="20" fill="url(#babyGradient)" opacity="0.8" transform="rotate(10 92 135)"/>
+                        
+                        <!-- Little hands -->
+                        <circle cx="47" cy="85" r="6" fill="url(#babyGradient)" opacity="0.9"/>
+                        <circle cx="113" cy="85" r="6" fill="url(#babyGradient)" opacity="0.9"/>
+                        
+                        <!-- Little feet -->
+                        <ellipse cx="65" cy="150" rx="5" ry="8" fill="url(#babyGradient)" opacity="0.9"/>
+                        <ellipse cx="95" cy="150" rx="5" ry="8" fill="url(#babyGradient)" opacity="0.9"/>
+                        
+                        <!-- Cute facial features -->
+                        <!-- Eyes (closed, sleeping) -->
+                        <path d="M68 55 Q72 50 76 55" stroke="#FF69B4" stroke-width="2" fill="none" stroke-linecap="round"/>
+                        <path d="M84 55 Q88 50 92 55" stroke="#FF69B4" stroke-width="2" fill="none" stroke-linecap="round"/>
+                        
+                        <!-- Nose -->
+                        <circle cx="80" cy="62" r="1.5" fill="#FF69B4" opacity="0.6"/>
+                        
+                        <!-- Mouth (sleeping smile) -->
+                        <path d="M74 68 Q80 72 86 68" stroke="#FF69B4" stroke-width="2" fill="none" stroke-linecap="round"/>
+                        
+                        <!-- Rosy cheeks -->
+                        <circle cx="65" cy="65" r="8" fill="#FFB6C1" opacity="0.3"/>
+                        <circle cx="95" cy="65" r="8" fill="#FFB6C1" opacity="0.3"/>
+                        
+                        <!-- Hair tuft -->
+                        <path d="M65 30 Q70 25 75 30 Q80 25 85 30 Q90 25 95 30" stroke="#FF69B4" stroke-width="3" fill="none" stroke-linecap="round"/>
+                        
+                        <!-- Umbilical cord (subtle) -->
+                        <circle cx="80" cy="110" r="2" fill="#FF1493" opacity="0.4"/>
+                        
+                        <defs>
+                            <linearGradient id="babyGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+                                <stop offset="0%" style="stop-color:#FFE4E1;stop-opacity:1" />
+                                <stop offset="50%" style="stop-color:#FFB6C1;stop-opacity:1" />
+                                <stop offset="100%" style="stop-color:#FF69B4;stop-opacity:0.8" />
+                            </linearGradient>
+                            
+                            <filter id="softGlow">
+                                <feGaussianBlur stdDeviation="2" result="coloredBlur"/>
+                                <feMerge> 
+                                    <feMergeNode in="coloredBlur"/>
+                                    <feMergeNode in="SourceGraphic"/>
+                                </feMerge>
+                            </filter>
+                        </defs>
+                        
+                        <!-- Apply soft glow to the entire baby -->
+                        <g filter="url(#softGlow)" opacity="0.9">
+                            <!-- This group creates a soft, dreamy effect -->
+                        </g>
+                    </svg>
+                </div>
+                <div class="glow-effect"></div>
+            </div>
+
+            <!-- Audio controls -->
+            <div class="audio-section">
+                <div class="audio-controls">
+                    <button id="playPauseBtn" class="play-btn">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
+                            <path d="M8 5v14l11-7z"/>
+                        </svg>
+                    </button>
+                    <span class="audio-label">Premier battement de cœur de Camille</span>
+                </div>
+                
+                <!-- Waveform container -->
+                <div id="waveform" class="waveform"></div>
+                
+                <!-- Audio file input for now - you'll replace this -->
+                <audio id="audioElement" preload="auto">
+                    <source src="camille_heartbeat.mp3" type="audio/mpeg">
+                    <source src="camille_heartbeat.wav" type="audio/wav">
+                    <source src="camille_heartbeat.ogg" type="audio/ogg">
+                </audio>
+            </div>
+
+            <!-- Bottom message -->
+            <div class="message">
+                <p>Un petit ange arrive bientôt... 👶✨</p>
+                <div class="countdown" id="countdown"></div>
+            </div>
+        </div>
+
+        <!-- Click to start overlay (for autoplay) -->
+        <div class="overlay" id="startOverlay">
+            <div class="overlay-content">
+                <h2>Écoutez le premier battement de cœur de Camille</h2>
+                <button class="start-btn" id="startBtn">
+                    <span>▶</span> Commencer l'expérience
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html> 
