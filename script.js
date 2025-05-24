@@ -1,22 +1,187 @@
 // Global variables
-let wavesurfer = null;
 let isPlaying = false;
 let audioElement = null;
-let isLocalFile = false;
-let visualizationInterval = null;
-let audioVisualizationInitialized = false; // Nouvelle variable pour éviter les doublons
+let sound = null;
+let fft = null;
+let amplitude = null;
+let canvas = null;
+let waveformContainer = null;
+let audioReady = false;
 
-// Initialize everything when DOM is loaded
+// Non-p5 functionality
 document.addEventListener('DOMContentLoaded', function() {
-    // Check if we're running locally
-    isLocalFile = window.location.protocol === 'file:';
-    
     initializeParticles();
     initializeFloatingHearts();
     initializeCountdown();
-    initializeAudio();
     setupEventListeners();
+    setupP5Canvas();
 });
+
+// Setup p5.js canvas inside the waveform container
+function setupP5Canvas() {
+    waveformContainer = document.getElementById('waveform');
+    
+    // Create p5 sketch
+    const sketch = (p) => {
+        p.setup = function() {
+            const canvasWidth = waveformContainer.offsetWidth || 400;
+            canvas = p.createCanvas(canvasWidth, 60);
+            canvas.parent('waveform');
+            canvas.style('border-radius', '5px');
+            
+            // Initialize audio analysis with p5.sound
+            try {
+                fft = new p5.FFT(0.8, 512);
+                amplitude = new p5.Amplitude();
+                
+                // Try to load audio file
+                sound = p.loadSound('camille_heartbeat.mp3', 
+                    () => {
+                        console.log('Audio loaded successfully with p5.sound!');
+                        audioReady = true;
+                        sound.setLoop(true);
+                        fft.setInput(sound);
+                        amplitude.setInput(sound);
+                    },
+                    () => {
+                        console.log('Audio file not found, using demo mode');
+                        audioReady = false;
+                    }
+                );
+            } catch (error) {
+                console.log('p5.sound initialization failed:', error);
+                audioReady = false;
+            }
+        };
+        
+        p.draw = function() {
+            p.clear();
+            
+            if (audioReady && fft) {
+                drawRealAudio(p);
+            } else {
+                drawDemoWaveform(p);
+            }
+        };
+        
+        p.windowResized = function() {
+            const newWidth = waveformContainer.offsetWidth || 400;
+            p.resizeCanvas(newWidth, 60);
+        };
+        
+        function drawRealAudio(p) {
+            let spectrum = fft.analyze();
+            let currentAmplitude = amplitude.getLevel();
+
+            p.noStroke();
+
+            let numBars = 90;
+            let barWidth = p.width / numBars;
+            let bassBins = 48; // Les 48 premières fréquences (basses)
+            let bassBars = Math.floor(numBars * 0.7); // 70% des barres pour les graves
+            let highBars = numBars - bassBars;
+            let maxFreqIndex = 128;
+
+            for (let i = 0; i < numBars; i++) {
+                let x = i * barWidth;
+                let amplitude = 0;
+
+                if (i < bassBars) {
+                    // Mapper linéairement les 48 basses fréquences sur 70% des barres
+                    let startIdx = Math.floor(i * bassBins / bassBars);
+                    let endIdx = Math.floor((i + 1) * bassBins / bassBars);
+                    let sum = 0, count = 0;
+                    for (let j = startIdx; j < endIdx; j++) {
+                        sum += spectrum[j] || 0;
+                        count++;
+                    }
+                    amplitude = count > 0 ? sum / count : 0;
+                } else {
+                    // Mapper le reste des fréquences (48 à 128) sur les barres restantes
+                    let startIdx = bassBins + Math.floor((i - bassBars) * (maxFreqIndex - bassBins) / highBars);
+                    let endIdx = bassBins + Math.floor((i - bassBars + 1) * (maxFreqIndex - bassBins) / highBars);
+                    let sum = 0, count = 0;
+                    for (let j = startIdx; j < endIdx; j++) {
+                        sum += spectrum[j] || 0;
+                        count++;
+                    }
+                    amplitude = count > 0 ? sum / count : 0;
+                }
+
+                // Hauteur limitée
+                let h = p.map(amplitude, 0, 255, 0, p.height * 0.6);
+                let globalBoost = currentAmplitude * 30;
+                h += globalBoost;
+                h = p.constrain(h, isPlaying ? 3 : 1, p.height * 0.7);
+
+                // Couleur
+                let intensity = p.map(h, 0, p.height * 0.7, 0, 1);
+                let r = p.lerp(255, 255, intensity);
+                let g = p.lerp(200, 105, intensity);
+                let b = p.lerp(220, 180, intensity);
+
+                // Lueur
+                if (isPlaying && h > 6) {
+                    p.fill(r, g, b, 100);
+                    p.rect(x - 1, p.height - h - 2, barWidth + 1, h + 4);
+                }
+
+                // Barre principale
+                p.fill(r, g, b);
+                p.rect(x, p.height - h, barWidth - 1, h);
+            }
+
+            // Pulse subtil
+            if (isPlaying) {
+                let time = p.millis() * 0.002;
+                let heartbeatPulse = p.sin(time * 3) * 0.1 + 0.9;
+                let globalAmplitudePulse = currentAmplitude * 50;
+                p.fill(255, 182, 193, (15 + globalAmplitudePulse) * heartbeatPulse);
+                p.rect(0, 0, p.width, p.height);
+            }
+        }
+        
+        function drawDemoWaveform(p) {
+            let time = p.millis() * 0.001;
+            
+            p.noStroke();
+            
+            // Demo bars across full width
+            let numBars = 120;
+            let barWidth = p.width / numBars;
+            
+            for (let i = 0; i < numBars; i++) {
+                let x = i * barWidth;
+                
+                // Create heartbeat pattern
+                let normalizedPos = i / numBars;
+                let wavePhase = time + normalizedPos * p.PI * 4;
+                let height = p.abs(p.sin(wavePhase)) * 25;
+                
+                // Add heartbeat rhythm
+                let beatPhase = (time * 1.5) % (p.PI * 2);
+                if (beatPhase < p.PI * 0.2) {
+                    height += p.sin(beatPhase / 0.2 * p.PI) * 15;
+                } else if (beatPhase > p.PI * 0.3 && beatPhase < p.PI * 0.5) {
+                    height += p.sin((beatPhase - p.PI * 0.3) / 0.2 * p.PI) * 8;
+                }
+                
+                // Add variation
+                height += p.sin(normalizedPos * p.PI) * 5;
+                height += p.random(-2, 2);
+                height = p.max(height, 3);
+                
+                // Color gradient
+                let alpha = p.map(height, 0, 40, 0.6, 1.0);
+                p.fill(255, 182, 193, 255 * alpha);
+                p.rect(x, p.height - height, barWidth - 1, height);
+            }
+        }
+    };
+    
+    // Create the p5 instance
+    new p5(sketch);
+}
 
 // Particle animation system
 function initializeParticles() {
@@ -32,16 +197,11 @@ function createParticle(container) {
     const particle = document.createElement('div');
     particle.className = 'particle';
     
-    // Random size between 2-8px
     const size = Math.random() * 6 + 2;
     particle.style.width = size + 'px';
     particle.style.height = size + 'px';
-    
-    // Random position
     particle.style.left = Math.random() * 100 + '%';
     particle.style.top = Math.random() * 100 + '%';
-    
-    // Random animation delay
     particle.style.animationDelay = Math.random() * 6 + 's';
     particle.style.animationDuration = (Math.random() * 4 + 4) + 's';
     
@@ -65,7 +225,6 @@ function createFloatingHeart() {
     
     document.body.appendChild(heart);
     
-    // Remove heart after animation
     setTimeout(() => {
         if (heart.parentNode) {
             heart.parentNode.removeChild(heart);
@@ -73,7 +232,7 @@ function createFloatingHeart() {
     }, 10000);
 }
 
-// Countdown to June 2025 and age calculation after birth
+// Countdown to June 2025
 function initializeCountdown() {
     const countdownElement = document.getElementById('countdown');
     
@@ -83,17 +242,15 @@ function initializeCountdown() {
         const distance = targetDate - now;
         
         if (distance < 0) {
-            // Camille is born! Calculate her age
             const birthDate = new Date('2025-06-21');
             const currentDate = new Date();
             
             const ageInMs = currentDate - birthDate;
             const ageInDays = Math.floor(ageInMs / (1000 * 60 * 60 * 24));
-            const ageInMonths = Math.floor(ageInDays / 30.44); // Average days per month
+            const ageInMonths = Math.floor(ageInDays / 30.44);
             const ageInYears = Math.floor(ageInMonths / 12);
             
             if (ageInMonths < 36) {
-                // Show age in months for first 3 years
                 if (ageInMonths === 0) {
                     const ageInWeeks = Math.floor(ageInDays / 7);
                     countdownElement.innerHTML = `Camille a ${ageInWeeks} semaine${ageInWeeks > 1 ? 's' : ''} ! 🎉`;
@@ -101,7 +258,6 @@ function initializeCountdown() {
                     countdownElement.innerHTML = `Camille a ${ageInMonths} mois ! 🎉`;
                 }
             } else {
-                // Show age in years after 36 months
                 const remainingMonths = ageInMonths % 12;
                 if (remainingMonths === 0) {
                     countdownElement.innerHTML = `Camille a ${ageInYears} an${ageInYears > 1 ? 's' : ''} ! 🎉`;
@@ -124,441 +280,62 @@ function initializeCountdown() {
     setInterval(updateCountdown, 1000);
 }
 
-// Audio initialization
-function initializeAudio() {
-    audioElement = document.getElementById('audioElement');
-    
-    // Check if audio file exists and can be loaded
-    audioElement.addEventListener('canplaythrough', function() {
-        console.log('Audio file detected and ready!');
-        
-        // Initialiser la visualisation une seule fois
-        if (!audioVisualizationInitialized) {
-            audioVisualizationInitialized = true;
-            
-            if (isLocalFile) {
-                // For local files, use synchronized heartbeat visualization
-                console.log('Local file detected, using synchronized heartbeat visualization');
-                createHeartbeatWaveform();
-            } else {
-                // For web, use WaveSurfer normally
-                initializeWaveSurfer();
-            }
-        }
-    });
-    
-    audioElement.addEventListener('error', function(e) {
-        console.log('No valid audio file found, using demo waveform');
-        if (!audioVisualizationInitialized) {
-            audioVisualizationInitialized = true;
-            createDemoWaveform();
-        }
-    });
-    
-    // Try to load the audio
-    audioElement.load();
-    
-    // If no audio loads after 2 seconds, show demo
-    setTimeout(() => {
-        if (audioElement.readyState === 0 && !audioVisualizationInitialized) {
-            console.log('No audio loaded after timeout, showing demo waveform');
-            audioVisualizationInitialized = true;
-            createDemoWaveform();
-        }
-    }, 2000);
-}
-
-function initializeWaveSurfer() {
-    try {
-        wavesurfer = WaveSurfer.create({
-            container: '#waveform',
-            waveColor: 'rgba(255, 182, 193, 0.8)',
-            progressColor: '#FF69B4',
-            cursorColor: '#FF1493',
-            barWidth: 3,
-            barGap: 2,
-            barRadius: 3,
-            responsive: true,
-            height: 60,
-            normalize: true,
-            mediaControls: false
-        });
-
-        // Load the audio into WaveSurfer using the media element
-        wavesurfer.loadMediaElement(audioElement);
-        
-        // WaveSurfer events
-        wavesurfer.on('ready', () => {
-            console.log('WaveSurfer ready with real audio!');
-            // Hide demo canvas if it exists
-            const demoCanvas = document.querySelector('#waveform canvas');
-            if (demoCanvas) {
-                demoCanvas.style.display = 'none';
-            }
-        });
-        
-        wavesurfer.on('error', (err) => {
-            console.log('WaveSurfer error:', err);
-            createHeartbeatWaveform();
-        });
-        
-    } catch (error) {
-        console.log('WaveSurfer initialization error:', error);
-        createHeartbeatWaveform();
-    }
-}
-
-// Create heartbeat-synchronized waveform for local files
-function createHeartbeatWaveform() {
-    const waveformContainer = document.getElementById('waveform');
-    
-    // Clear any existing content
-    waveformContainer.innerHTML = '';
-    
-    const canvas = document.createElement('canvas');
-    canvas.width = waveformContainer.offsetWidth || 400;
-    canvas.height = 60;
-    canvas.style.width = '100%';
-    canvas.style.height = '60px';
-    waveformContainer.appendChild(canvas);
-    
-    const ctx = canvas.getContext('2d');
-    let isAudioPlaying = false;
-    let audioContext = null;
-    let analyser = null;
-    let dataArray = null;
-    let hasRealAudio = false;
-    let source = null;
-    
-    // Variables pour la répartition audio
-    let audioData = new Array(128).fill(0); // Buffer pour lisser les données
-    
-    function setupAudioAnalysis() {
-        try {
-            if (audioContext) return; // Éviter les doublons
-            
-            // Create audio context when user interacts
-            audioContext = new (window.AudioContext || window.webkitAudioContext)();
-            analyser = audioContext.createAnalyser();
-            
-            // Connect to the audio element
-            source = audioContext.createMediaElementSource(audioElement);
-            source.connect(analyser);
-            analyser.connect(audioContext.destination);
-            
-            analyser.fftSize = 256;
-            analyser.smoothingTimeConstant = 0.85;
-            const bufferLength = analyser.frequencyBinCount;
-            dataArray = new Uint8Array(bufferLength);
-            
-            hasRealAudio = true;
-            console.log('Real audio analysis setup successful!');
-            
-        } catch (error) {
-            console.log('Could not setup real audio analysis, using simulation:', error);
-            hasRealAudio = false;
-        }
-    }
-    
-    // Event listeners pour l'audio (définis une seule fois)
-    function onPlay() {
-        isAudioPlaying = true;
-        console.log('Audio playing, activating visualization');
-        
-        if (!hasRealAudio && !audioContext) {
-            setupAudioAnalysis();
-        }
-        
-        // Resume audio context si suspendu
-        if (audioContext && audioContext.state === 'suspended') {
-            audioContext.resume();
-        }
-    }
-    
-    function onPause() {
-        isAudioPlaying = false;
-    }
-    
-    function onEnded() {
-        isAudioPlaying = false;
-    }
-    
-    // Ajouter les listeners une seule fois
-    audioElement.addEventListener('play', onPlay);
-    audioElement.addEventListener('pause', onPause);
-    audioElement.addEventListener('ended', onEnded);
-    
-    function drawVisualization() {
-        if (!canvas.parentNode) return;
-        
-        requestAnimationFrame(drawVisualization);
-        
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-        
-        const barWidth = 3;
-        const barGap = 1;
-        const barCount = Math.floor(canvas.width / (barWidth + barGap));
-        const centerY = canvas.height / 2;
-        
-        if (isAudioPlaying && hasRealAudio && analyser && dataArray) {
-            // Get real audio data
-            analyser.getByteFrequencyData(dataArray);
-            
-            // Pour les battements de cœur, l'énergie est surtout dans les basses fréquences
-            // On va utiliser seulement les premières fréquences mais les répartir sur toute la largeur
-            const usefulFreqRange = Math.min(32, dataArray.length); // Utiliser seulement les 32 premières fréquences
-            
-            for (let i = 0; i < barCount; i++) {
-                // Mapper chaque barre à une fréquence dans la plage utile
-                const freqIndex = Math.floor((i / barCount) * usefulFreqRange);
-                
-                // Prendre la valeur principale + quelques voisines
-                let amplitude = dataArray[freqIndex];
-                
-                // Ajouter les fréquences adjacentes pour plus de richesse
-                if (freqIndex + 1 < usefulFreqRange) amplitude += dataArray[freqIndex + 1] * 0.5;
-                if (freqIndex - 1 >= 0) amplitude += dataArray[freqIndex - 1] * 0.5;
-                
-                // Normaliser
-                amplitude = amplitude / 255;
-                
-                // Ajouter des variations basées sur la position pour étaler visuellement
-                const positionVariation = Math.sin((i / barCount) * Math.PI * 2) * 0.3 + 1;
-                amplitude *= positionVariation;
-                
-                // Ajouter un peu de variation temporelle pour plus de dynamisme
-                const timeVariation = Math.sin(Date.now() / 1000 + i * 0.1) * 0.2 + 1;
-                amplitude *= timeVariation;
-                
-                // Courbe de sensibilité
-                amplitude = Math.pow(amplitude, 0.7) * 1.8;
-                
-                // Stocker dans notre buffer pour lisser
-                audioData[i] = audioData[i] * 0.6 + amplitude * 0.4;
-                
-                // Calculer la hauteur de la barre
-                const barHeight = Math.max(3, audioData[i] * 45);
-                const y = centerY - barHeight / 2;
-                const x = i * (barWidth + barGap);
-                
-                // Gradient basé sur l'amplitude
-                const intensity = audioData[i];
-                const gradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
-                gradient.addColorStop(0, `rgba(255, 182, 193, ${0.8 + intensity * 0.2})`);
-                gradient.addColorStop(0.5, `rgba(255, 105, 180, ${0.9 + intensity * 0.1})`);
-                gradient.addColorStop(1, `rgba(255, 20, 147, ${0.7 + intensity * 0.3})`);
-                
-                ctx.fillStyle = gradient;
-                ctx.fillRect(x, y, barWidth, barHeight);
-            }
-            
-        } else {
-            // Pattern de fallback
-            for (let i = 0; i < barCount; i++) {
-                const x = i * (barWidth + barGap);
-                let barHeight;
-                
-                if (isAudioPlaying) {
-                    // Simulate heartbeat pattern
-                    const time = Date.now() / 1000;
-                    const beatFreq = 2;
-                    const position = (time * beatFreq + i * 0.1) % 1;
-                    
-                    let intensity = 0;
-                    
-                    if (position < 0.15) {
-                        intensity = Math.sin((position / 0.15) * Math.PI) * 0.9;
-                    } else if (position < 0.2) {
-                        intensity = 0;
-                    } else if (position < 0.3) {
-                        intensity = Math.sin(((position - 0.2) / 0.1) * Math.PI) * 0.5;
-                    } else {
-                        intensity = (Math.random() - 0.5) * 0.08;
-                    }
-                    
-                    const barVariation = Math.sin(i * 0.3) * 0.1;
-                    intensity = Math.max(0, intensity + barVariation);
-                    barHeight = intensity * 40 + 5;
-                } else {
-                    barHeight = Math.abs(Math.sin(i * 0.4)) * 6 + 2;
-                }
-                
-                const y = centerY - barHeight / 2;
-                const intensity = barHeight / 45;
-                const gradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
-                
-                if (isAudioPlaying) {
-                    gradient.addColorStop(0, `rgba(255, 182, 193, ${0.7 + intensity * 0.3})`);
-                    gradient.addColorStop(1, `rgba(255, 105, 180, ${0.6 + intensity * 0.4})`);
-                } else {
-                    gradient.addColorStop(0, `rgba(255, 182, 193, 0.4)`);
-                    gradient.addColorStop(1, `rgba(255, 105, 180, 0.3)`);
-                }
-                
-                ctx.fillStyle = gradient;
-                ctx.fillRect(x, y, barWidth, barHeight);
-            }
-        }
-    }
-    
-    // Start visualization
-    drawVisualization();
-    console.log('Audio visualization ready!');
-}
-
-// Create a demo waveform visualization
-function createDemoWaveform() {
-    const waveformContainer = document.getElementById('waveform');
-    
-    // Clear any existing content
-    const existingCanvas = waveformContainer.querySelector('canvas');
-    if (existingCanvas) {
-        existingCanvas.remove();
-    }
-    
-    const canvas = document.createElement('canvas');
-    canvas.width = waveformContainer.offsetWidth || 400;
-    canvas.height = 60;
-    canvas.style.width = '100%';
-    canvas.style.height = '60px';
-    waveformContainer.appendChild(canvas);
-    
-    const ctx = canvas.getContext('2d');
-    animateWaveform(ctx, canvas);
-}
-
-function animateWaveform(ctx, canvas) {
-    let time = 0;
-    
-    function draw() {
-        if (!canvas.parentNode) return; // Stop if canvas is removed
-        
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-        
-        const barWidth = 3;
-        const barGap = 2;
-        const barCount = Math.floor(canvas.width / (barWidth + barGap));
-        
-        for (let i = 0; i < barCount; i++) {
-            const x = i * (barWidth + barGap);
-            const height = Math.abs(Math.sin(time + i * 0.1)) * 40 + 10;
-            const y = (canvas.height - height) / 2;
-            
-            const gradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
-            gradient.addColorStop(0, 'rgba(255, 182, 193, 0.8)');
-            gradient.addColorStop(1, 'rgba(255, 105, 180, 0.8)');
-            
-            ctx.fillStyle = gradient;
-            ctx.fillRect(x, y, barWidth, height);
-        }
-        
-        time += 0.05;
-        requestAnimationFrame(draw);
-    }
-    
-    draw();
-}
-
 // Event listeners
 function setupEventListeners() {
     const startBtn = document.getElementById('startBtn');
     const playPauseBtn = document.getElementById('playPauseBtn');
     const overlay = document.getElementById('startOverlay');
     
-    // Start button to begin experience
+    // Start button
     startBtn.addEventListener('click', function() {
         overlay.classList.add('hidden');
         
-        // Try to start audio if available
-        if (wavesurfer && wavesurfer.isReady) {
-            wavesurfer.play();
+        // Start audio with p5.sound if available
+        if (audioReady && sound) {
+            sound.play();
+            isPlaying = true;
             updatePlayButton(true);
-        } else if (audioElement && audioElement.readyState >= 3) {
-            audioElement.play().catch(e => console.log('Audio play failed:', e));
+        } else {
+            // Just show demo animation
             isPlaying = true;
             updatePlayButton(true);
         }
         
-        // Add some extra visual effects
         startExperience();
     });
     
     // Play/pause button
     playPauseBtn.addEventListener('click', function() {
-        if (wavesurfer && wavesurfer.isReady) {
+        if (audioReady && sound) {
             if (isPlaying) {
-                wavesurfer.pause();
+                sound.pause();
+                isPlaying = false;
             } else {
-                wavesurfer.play();
+                sound.play();
+                isPlaying = true;
             }
-        } else if (audioElement && audioElement.readyState >= 3) {
-            if (isPlaying) {
-                audioElement.pause();
-            } else {
-                audioElement.play().catch(e => console.log('Audio play failed:', e));
-            }
-            isPlaying = !isPlaying;
-            updatePlayButton(isPlaying);
         } else {
-            // If no audio, just toggle visual feedback
+            // Toggle demo mode
             isPlaying = !isPlaying;
-            updatePlayButton(isPlaying);
+        }
+        updatePlayButton(isPlaying);
+    });
+    
+    // Setup audio events if using fallback HTML5 audio
+    audioElement = document.getElementById('audioElement');
+    audioElement.addEventListener('play', () => {
+        if (!audioReady) {
+            isPlaying = true;
+            updatePlayButton(true);
         }
     });
     
-    // WaveSurfer events
-    if (wavesurfer) {
-        wavesurfer.on('play', () => {
-            isPlaying = true;
-            updatePlayButton(true);
-        });
-        
-        wavesurfer.on('pause', () => {
+    audioElement.addEventListener('pause', () => {
+        if (!audioReady) {
             isPlaying = false;
             updatePlayButton(false);
-        });
-        
-        wavesurfer.on('finish', () => {
-            isPlaying = false;
-            updatePlayButton(false);
-        });
-    }
-    
-    // HTML Audio events (for local files)
-    if (audioElement) {
-        // Enable loop by default
-        audioElement.loop = true;
-        
-        audioElement.addEventListener('play', () => {
-            if (!wavesurfer || !wavesurfer.isReady) {
-                isPlaying = true;
-                updatePlayButton(true);
-            }
-        });
-        
-        audioElement.addEventListener('pause', () => {
-            if (!wavesurfer || !wavesurfer.isReady) {
-                isPlaying = false;
-                updatePlayButton(false);
-            }
-        });
-        
-        audioElement.addEventListener('ended', () => {
-            // This shouldn't happen with loop=true, but just in case
-            if (!audioElement.loop && (!wavesurfer || !wavesurfer.isReady)) {
-                isPlaying = false;
-                updatePlayButton(false);
-            }
-        });
-        
-        // Handle loop
-        audioElement.addEventListener('timeupdate', () => {
-            // Ensure loop is always enabled when audio is playing
-            if (isPlaying && !audioElement.loop) {
-                audioElement.loop = true;
-            }
-        });
-    }
+        }
+    });
 }
 
 function updatePlayButton(playing) {
@@ -571,16 +348,18 @@ function updatePlayButton(playing) {
 }
 
 function startExperience() {
-    // Add extra sparkle effects
+    // Add sparkle effects
     for (let i = 0; i < 20; i++) {
         setTimeout(() => {
             createSparkle();
         }, i * 100);
     }
     
-    // Pulse the baby silhouette
+    // Pulse baby animation
     const babyContainer = document.querySelector('.baby-container');
+    if (babyContainer) {
     babyContainer.style.animation = 'breathe 1s ease-in-out 3';
+    }
 }
 
 function createSparkle() {
@@ -598,7 +377,6 @@ function createSparkle() {
     
     document.body.appendChild(sparkle);
     
-    // Animate sparkle
     sparkle.animate([
         { opacity: 0, transform: 'scale(0)' },
         { opacity: 1, transform: 'scale(1)' },
@@ -613,14 +391,7 @@ function createSparkle() {
     });
 }
 
-// Handle window resize for responsive design
-window.addEventListener('resize', function() {
-    if (wavesurfer && wavesurfer.drawBuffer) {
-        wavesurfer.drawBuffer();
-    }
-});
-
-// Add some interactive hover effects
+// Interactive hover effects
 document.addEventListener('mousemove', function(e) {
     const baby = document.querySelector('.baby-silhouette');
     if (baby) {
@@ -635,7 +406,7 @@ document.addEventListener('mousemove', function(e) {
     }
 });
 
-// Add Easter egg - click on baby for surprise
+// Easter egg - click baby for surprise
 document.addEventListener('DOMContentLoaded', function() {
     const baby = document.querySelector('.baby-silhouette');
     if (baby) {
@@ -646,7 +417,6 @@ document.addEventListener('DOMContentLoaded', function() {
                 }, i * 200);
             }
             
-            // Play a special animation
             this.style.animation = 'breathe 0.5s ease-in-out 6';
         });
     }
